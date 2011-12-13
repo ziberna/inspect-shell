@@ -171,7 +171,6 @@ class Shell(object):
     def __init__(self, interface, port):
         self.interface = interface
         self.port = port
-        self.reconnect()
         
     def reconnect(self):
         self.sock = socket.socket()
@@ -227,6 +226,11 @@ class Shell(object):
             interface=self.interface,
             port=self.port
         )
+        
+        try: self.reconnect()
+        except socket.error:
+            print "** ERROR connecting to %s:%d, are you sure you added \
+\"import inspect_shell\" to the top of your script? **\n" % (self.interface, self.port)
            
         while True:
             try: line = raw_input(prompt)
