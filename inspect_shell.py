@@ -39,10 +39,27 @@ try: import readline
 except ImportError: readline = None
 
 
+
+
+
+
+
+interface = "localhost"
 default_port = 1234
+reconnect_tries = 3
 
 
 
+
+
+# actions that the shell can make to the server
+COMMAND = "\x00"
+AUTO_COMPLETE = "\x01"
+
+
+
+class PortInUseException(Exception): pass
+class Disconnected(Exception): pass
 
 
 
@@ -60,24 +77,18 @@ def stdoutIO():
     sys.stdout = old_out
 
 
-class PortInUseException(Exception): pass
 
 
 
 
-# actions that the shell can make to the server
-COMMAND = "\x00"
-AUTO_COMPLETE = "\x01"
 
-
-
-def run_shell_server(f_globals, port):     
+def run_shell_server(f_globals, iterface, port):     
     auto_complete = rlcompleter.Completer(namespace=f_globals)
            
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     
-    try: sock.bind(("localhost", port))
+    try: sock.bind((interface, port))
     except Exception, e:
         if isinstance(e, socket.error) and getattr(e, "errno", False) == 98:
             raise PortInUseException("%d in use" % port)
@@ -86,23 +97,45 @@ def run_shell_server(f_globals, port):
     sock.listen(100)   
     
     
+    
     def run_repl(sock):
         
         def do_reply(data):
             data = json.dumps(data)
-            out = struct.pack("i", len(data)) + data
-            sock.send(out)
+            out = struct.pack("!i", len(data)) + data
+            sock.sendall(out)
 
         while True:
-            data = sock.recv(5)
+            
+            # read the length of the request
+            request_length = 5
+            data = []
+            while request_length:
+                try: chunk = sock.recv(request_length)
+                except: return
+                
+                # socket is done sending, but we're clearly not done
+                # receiving.  this would be an error, but let's not
+                # disrupt our process, so just return
+                if not chunk: return
+                
+                data.append(chunk)
+                request_length -= len(chunk)
+            data = "".join(data)
+            
+            # debugging
             #print repr(data)
             
-            if not data: return
-            action, size = struct.unpack("!ci", data)
-
-            data = sock.recv(size)
-            if not data: return
-            data = json.loads(data)
+            action, request_length = struct.unpack("!ci", data)
+            
+            
+            # read the request and load it with json
+            request = []
+            while request_length:
+                chunk = sock.recv(request_length)
+                request.append(chunk)
+                request_length -= len(chunk)
+            data = json.loads("".join(request))
             
             
             if action == COMMAND:
@@ -112,11 +145,13 @@ def run_shell_server(f_globals, port):
                     except: print traceback.format_exc()
     
                 out = stdout.getvalue()
-                do_reply(out)
+                try: do_reply(out)
+                except: return
             
             elif action == AUTO_COMPLETE:
                 ac = auto_complete.complete(*data)
-                do_reply(ac)
+                try: do_reply(ac)
+                except: return
             
     
     # our main loop for dispatching new connections
@@ -130,33 +165,71 @@ def run_shell_server(f_globals, port):
 
 
 
-
-
-def open_shell(port):
-    sock = socket.socket()
-    sock.connect(("localhost", port))
-
-    
-    
-    def do_request(action, data):
+class Shell(object):
+    def __init__(self, interface, port):
+        self.interface = interface
+        self.port = port
+        self.reconnect()
+        
+    def reconnect(self):
+        self.sock = socket.socket()
+        self.sock.connect((self.interface, self.port))
+        self.sock.settimeout(30)
+        
+        
+    def send(self, command, data):
+        sent = False
+        for i in xrange(reconnect_tries):
+            try: reply = self._do_request(command, data)
+            except Disconnected: self.reconnect()
+            else: return reply
+            
+        raise Disconnected, "and tried %d times to reconnect" % reconnect_tries
+        
+        
+    def _do_request(self, action, data):
         data = json.dumps(data)
         data = action + struct.pack("!i", len(data)) + data
-        sock.send(data)
-    
-        size = sock.recv(4)
-        if not size: return
-        size = struct.unpack("i", size)[0]
-    
-        if size:
-            reply = sock.recv(size)
-            return json.loads(reply)
         
+        try: self.sock.sendall(data)
+        except: raise Disconnected
+        
+        
+        # read the length of the reply
+        reply_length = 4
+        data = []
+        while reply_length:
+            chunk = self.sock.recv(reply_length)
+            if not chunk: raise Disconnected
             
+            data.append(chunk)
+            reply_length -= len(chunk)
+        data = "".join(data)
+        reply_length = struct.unpack("!i", data)[0]
+        
+        
+        # read the reply
+        reply = []
+        while reply_length:
+            chunk = self.sock.recv(reply_length)
+            if not chunk: raise Disconnected
+            reply.append(chunk)
+            reply_length -= len(chunk)
+        
+        return json.loads("".join(reply))
+        
+        
+        
+
+
+
+def open_shell(interface, port):
+    shell = Shell(interface, port)
+    
         
     if readline:
         def auto_completer(*args):
-            reply = do_request(AUTO_COMPLETE, args)
-            return reply
+            return shell.send(AUTO_COMPLETE, args)            
         
         readline.set_completer(auto_completer)
         readline.parse_and_bind("tab: complete")
@@ -168,8 +241,8 @@ def open_shell(port):
         try: line = raw_input(prompt)
         except EOFError: return
         
-        reply = do_request(COMMAND, line)
-        if reply is not None: print reply
+        reply = shell.send(COMMAND, line)         
+        print reply
             
             
 
@@ -195,7 +268,7 @@ if __name__ == "__main__":
         except IOError: pass
         atexit.register(readline.write_history_file, histfile)
     
-    open_shell(port)
+    open_shell(interface, port)
     
 # it's being imported, run the shell server
 else:
@@ -203,7 +276,7 @@ else:
     f_globals = caller.f_globals
     port = f_globals.get("inspect_shell_port", default_port)
     
-    st = threading.Thread(target=run_shell_server, args=(f_globals, port))
+    st = threading.Thread(target=run_shell_server, args=(f_globals, interface, port))
     st.daemon = True
     st.start()
     
