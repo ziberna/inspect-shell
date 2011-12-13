@@ -47,8 +47,7 @@ except ImportError: readline = None
 interface = "localhost"
 default_port = 1234
 reconnect_tries = 3
-
-
+version = "1.0"
 
 
 
@@ -166,6 +165,9 @@ def run_shell_server(f_globals, iterface, port):
 
 
 class Shell(object):
+    prompt_template = "{interface}:{port:d}> "
+    banner_template = "\n>> Inspect Shell v{version}\n>> https://github.com/amoffat/Inspect-Shell\n"
+
     def __init__(self, interface, port):
         self.interface = interface
         self.port = port
@@ -219,31 +221,19 @@ class Shell(object):
         return json.loads("".join(reply))
         
         
-        
-
-
-
-def open_shell(interface, port):
-    shell = Shell(interface, port)
-    
-        
-    if readline:
-        def auto_completer(*args):
-            return shell.send(AUTO_COMPLETE, args)            
-        
-        readline.set_completer(auto_completer)
-        readline.parse_and_bind("tab: complete")
+    def run(self):
+        print Shell.banner_template.format(version=version)
+        prompt = Shell.prompt_template.format(
+            interface=self.interface,
+            port=self.port
+        )
+           
+        while True:
+            try: line = raw_input(prompt)
+            except EOFError: return
             
-    
-    prompt = "is:%d> " % port
-
-    while True:
-        try: line = raw_input(prompt)
-        except EOFError: return
-        
-        reply = shell.send(COMMAND, line)         
-        print reply
-            
+            reply = self.send(COMMAND, line)         
+            print reply
             
 
 
@@ -259,6 +249,8 @@ if __name__ == "__main__":
     try: port = int(sys.argv[1])
     except: port = default_port
     
+    shell = Shell(interface, port)
+    
     if readline:
         import os
         import atexit
@@ -267,8 +259,14 @@ if __name__ == "__main__":
         try: readline.read_history_file(histfile)
         except IOError: pass
         atexit.register(readline.write_history_file, histfile)
+        
+        # set up auto-completion
+        def auto_completer(*args): return shell.send(AUTO_COMPLETE, args)        
+        readline.set_completer(auto_completer)
+        readline.parse_and_bind("tab: complete")
+        
+    shell.run()
     
-    open_shell(interface, port)
     
 # it's being imported, run the shell server
 else:
