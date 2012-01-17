@@ -81,7 +81,7 @@ def stdoutIO():
 
 
 
-def run_shell_server(f_globals, iterface, port):     
+def run_shell_server(f_globals, interface, port):     
     auto_complete = rlcompleter.Completer(namespace=f_globals)
            
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
