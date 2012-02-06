@@ -234,7 +234,9 @@ class Shell(object):
            
         while True:
             try: line = raw_input(prompt)
-            except EOFError: return
+            except (EOFError, KeyboardInterrupt):
+                print('')
+                return
             
             reply = self.send(COMMAND, line)         
             print reply
