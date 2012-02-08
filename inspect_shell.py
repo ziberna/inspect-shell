@@ -238,9 +238,9 @@ class Shell(object):
                 print('')
                 return
             
-            reply = self.send(COMMAND, line)         
-            print reply
-            
+            reply = self.send(COMMAND, line).strip()
+            if reply:
+                print(reply)
 
 
 
