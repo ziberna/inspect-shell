@@ -238,9 +238,9 @@ class Shell(object):
                 print('')
                 return
             
-            reply = self.send(COMMAND, line).strip()
-            if reply:
-                print(reply)
+            reply = self.send(COMMAND, line)
+            # print the original string without additional newline
+            sys.stdout.write(reply)
 
 
 
