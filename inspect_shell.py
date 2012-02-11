@@ -31,6 +31,7 @@ import threading
 import random
 import socket
 import json
+import codeop
 
 
 
@@ -165,7 +166,7 @@ def run_shell_server(f_globals, interface, port):
 
 
 class Shell(object):
-    prompt_template = "{interface}:{port:d}> "
+    prompt_template = "{interface}:{port:d}"
     banner_template = "\n>> Inspect Shell v{version}\n>> https://github.com/amoffat/Inspect-Shell\n"
 
     def __init__(self, interface, port):
@@ -233,7 +234,7 @@ class Shell(object):
 \"import inspect_shell\" to the top of your script? **\n" % (self.interface, self.port)
            
         while True:
-            try: line = raw_input(prompt)
+            try: line = code_input(prompt)
             except (EOFError, KeyboardInterrupt):
                 print('')
                 return
@@ -242,8 +243,25 @@ class Shell(object):
             print reply
             
 
-
-
+def code_input(prompt_base):
+    """
+    This runs on the Inspect-Shell's side. The compiler is used to perform
+    multi-line code input.
+    """
+    code = ''
+    compiled = None
+    while not compiled:
+        prompt = '>>> ' if not code else '... '
+        code += raw_input(prompt_base + prompt)  # add a line to the code string
+        try:
+            # returns None if the code is valid but not finished
+            compiled = codeop.compile_command(code, '<inspect-shell>', 'single')
+        except (SyntaxError, OverflowError, ValueError):
+            traceback.print_exc(0)  # only first entry in the stack
+            code = ''
+        else:
+            code += '\n'
+    return code
 
 
 
